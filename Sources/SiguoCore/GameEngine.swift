@@ -5,6 +5,7 @@ public struct GameState: Equatable, Codable, Sendable {
     public var phase: GamePhase
     public var visibilityMode: VisibilityMode
     public var mineRule: MineRule
+    public var aiDifficulty: AIDifficulty
     public var currentTurn: Seat
     public var pieces: [BoardCoord: Piece]
     public var eliminatedSeats: Set<Seat>
@@ -16,6 +17,7 @@ public struct GameState: Equatable, Codable, Sendable {
         phase: GamePhase = .setup,
         visibilityMode: VisibilityMode = .doubleVisible,
         mineRule: MineRule = .classicSurvives,
+        aiDifficulty: AIDifficulty = .master,
         currentTurn: Seat = .south,
         pieces: [BoardCoord: Piece] = [:],
         eliminatedSeats: Set<Seat> = [],
@@ -26,6 +28,7 @@ public struct GameState: Equatable, Codable, Sendable {
         self.phase = phase
         self.visibilityMode = visibilityMode
         self.mineRule = mineRule
+        self.aiDifficulty = aiDifficulty
         self.currentTurn = currentTurn
         self.pieces = pieces
         self.eliminatedSeats = eliminatedSeats
@@ -41,6 +44,7 @@ public enum GameEngine {
     public static func newGame(
         visibilityMode: VisibilityMode = .doubleVisible,
         mineRule: MineRule = .classicSurvives,
+        aiDifficulty: AIDifficulty = .master,
         southPreset: PresetFormation = .balanced,
         customSouthLayout: [LocalCoord: PieceRank]? = nil
     ) -> GameState {
@@ -72,6 +76,7 @@ public enum GameEngine {
             phase: .setup,
             visibilityMode: visibilityMode,
             mineRule: mineRule,
+            aiDifficulty: aiDifficulty,
             currentTurn: .south,
             pieces: allPieces,
             eliminatedSeats: [],

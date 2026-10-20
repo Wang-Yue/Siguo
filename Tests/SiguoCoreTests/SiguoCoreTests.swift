@@ -142,10 +142,10 @@ struct SiguoCoreTests {
 
     @Test("AI 決策引擎在雙明與四暗模式下能穩定選出合法步數")
     func aiPlayerChoosesValidMoves() {
-        var state = GameEngine.newGame(visibilityMode: .doubleVisible)
+        var state = GameEngine.newGame(visibilityMode: .doubleVisible, aiDifficulty: .master)
         GameEngine.startGame(in: &state)
 
-        // 先讓南方走一步合法棋，再測試東、北、西三家 AI 連續行棋 12 步
+        // 先讓南方走一步合法棋，再測試東、北、西三家大師級 AI 連續行棋 12 步
         for _ in 0..<12 {
             guard state.phase == .playing else { break }
             let current = state.currentTurn
@@ -157,5 +157,120 @@ struct SiguoCoreTests {
             }
         }
         #expect(state.moveHistory.count == 12)
+    }
+
+    @Test("129x129 鐵路感知最短步數矩陣：精確反映直線與工兵飛棋距離")
+    func railwayTurnDistanceMatrix() {
+        let graph = BoardGraph.shared
+        let southFrontLeft = BoardCoord(row: 11, col: 6)
+        let northBackLeft = BoardCoord(row: 1, col: 6)
+        let eastTopFlank = BoardCoord(row: 6, col: 14)
+
+        // 同一條左縱鐵路線上，相隔 10 格亦只需 1 步直達
+        #expect(graph.turnDistance(from: southFrontLeft, to: northBackLeft, isSapper: false) == 1)
+
+        // 需轉彎的跨翼鐵路：非工兵需 2 步，工兵飛棋只需 1 步
+        #expect(graph.turnDistance(from: southFrontLeft, to: eastTopFlank, isSapper: false) == 2)
+        #expect(graph.turnDistance(from: southFrontLeft, to: eastTopFlank, isSapper: true) == 1)
+    }
+
+    @Test("貝氏信念追蹤器 (AIBeliefTracker)：根據交戰歷史與陣亡牌池精準推算敵方暗棋階級")
+    func beliefTrackerDeducesRankBounds() {
+        var state = GameState(
+            phase: .playing,
+            visibilityMode: .doubleVisible,
+            mineRule: .classicSurvives,
+            aiDifficulty: .master,
+            currentTurn: .east
+        )
+
+        let eastMysteryCoord = BoardCoord(row: 10, col: 6)
+        let southDivisionCoord = BoardCoord(row: 11, col: 6)
+        let southFlagCoord = BoardGraph.globalCoord(for: .south, local: LocalCoord(row: 5, col: 1))
+        let southBackupCoord = BoardGraph.globalCoord(for: .south, local: LocalCoord(row: 4, col: 0))
+        let eastFlagCoord = BoardGraph.globalCoord(for: .east, local: LocalCoord(row: 5, col: 1))
+        let northFlagCoord = BoardGraph.globalCoord(for: .north, local: LocalCoord(row: 5, col: 1))
+        let northSubCoord = BoardGraph.globalCoord(for: .north, local: LocalCoord(row: 0, col: 0))
+        let westFlagCoord = BoardGraph.globalCoord(for: .west, local: LocalCoord(row: 5, col: 1))
+        let westSubCoord = BoardGraph.globalCoord(for: .west, local: LocalCoord(row: 0, col: 0))
+
+        // 東方一枚未知暗棋（實際為軍長）主動出擊吃掉南方師長 (38)
+        state.pieces[eastMysteryCoord] = Piece(owner: .east, rank: .corps)
+        state.pieces[southDivisionCoord] = Piece(owner: .south, rank: .division)
+        state.pieces[southFlagCoord] = Piece(owner: .south, rank: .flag)
+        state.pieces[southBackupCoord] = Piece(owner: .south, rank: .company)
+        state.pieces[eastFlagCoord] = Piece(owner: .east, rank: .flag)
+        state.pieces[northFlagCoord] = Piece(owner: .north, rank: .flag)
+        state.pieces[northSubCoord] = Piece(owner: .north, rank: .brigade)
+        state.pieces[westFlagCoord] = Piece(owner: .west, rank: .flag)
+        state.pieces[westSubCoord] = Piece(owner: .west, rank: .brigade)
+
+        let attackMove = ValidMove(
+            from: eastMysteryCoord,
+            to: southDivisionCoord,
+            path: [eastMysteryCoord, southDivisionCoord]
+        )
+        GameEngine.applyMove(attackMove, in: &state)
+
+        // 1. 從北方盟友（或南方）視角觀察剛才吃掉南方師長的東方暗棋：
+        // 因為它主動吃掉師長(38)並存活，它只可能是司令(40)或軍長(39)！
+        let trackerBeforeFlagReveal = AIBeliefTracker(state: state, observer: .north)
+        let belief1 = trackerBeforeFlagReveal.beliefsByCoord[southDivisionCoord]
+        #expect(belief1 != nil)
+        #expect(belief1?.minCombatStrength == 39)
+        #expect(belief1?.probability(of: .division) == 0.0)
+        #expect(belief1?.probability(of: .bomb) == 0.0)
+        #expect((belief1?.probability(of: .commander) ?? 0.0) > 0.0)
+        #expect((belief1?.probability(of: .corps) ?? 0.0) > 0.0)
+
+        // 2. 若東方軍旗已經公開亮出（代表東方司令已死），信念追蹤器應 100% 鎖定該暗棋必為「軍長」！
+        state.pieces[eastFlagCoord]?.isPubliclyRevealed = true
+        let trackerAfterFlagReveal = AIBeliefTracker(state: state, observer: .north)
+        let belief2 = trackerAfterFlagReveal.beliefsByCoord[southDivisionCoord]
+        #expect(belief2?.confirmedRank == .corps)
+        #expect(belief2?.probability(of: .corps) == 1.0)
+    }
+
+    @Test("大師級 AI 靜態反擊評估 (SEE)：司令不會貪吃受敵方炸彈保護的誘餌小子")
+    func masterAIAvoidsBombAndCommanderTrap() {
+        var state = GameState(
+            phase: .playing,
+            visibilityMode: .allVisible,
+            mineRule: .classicSurvives,
+            aiDifficulty: .master,
+            currentTurn: .south
+        )
+
+        let southCommanderPos = BoardCoord(row: 11, col: 6)
+        let southPlatoonPos = BoardCoord(row: 11, col: 10)
+        let eastBaitPlatoonPos = BoardCoord(row: 10, col: 6)
+        let eastBombAmbushPos = BoardCoord(row: 8, col: 6) // 同在 col=6 鐵路線上，隨時可一步炸掉 (10,6)
+        let eastEasyTargetPos = BoardCoord(row: 10, col: 10)
+
+        let southFlagPos = BoardGraph.globalCoord(for: .south, local: LocalCoord(row: 5, col: 1))
+        let eastFlagPos = BoardGraph.globalCoord(for: .east, local: LocalCoord(row: 5, col: 1))
+        let northFlagPos = BoardGraph.globalCoord(for: .north, local: LocalCoord(row: 5, col: 1))
+        let northSubPos = BoardGraph.globalCoord(for: .north, local: LocalCoord(row: 0, col: 2))
+        let westFlagPos = BoardGraph.globalCoord(for: .west, local: LocalCoord(row: 5, col: 1))
+        let westSubPos = BoardGraph.globalCoord(for: .west, local: LocalCoord(row: 0, col: 2))
+
+        state.pieces[southCommanderPos] = Piece(owner: .south, rank: .commander)
+        state.pieces[southPlatoonPos] = Piece(owner: .south, rank: .brigade)
+        state.pieces[eastBaitPlatoonPos] = Piece(owner: .east, rank: .platoon)
+        state.pieces[eastBombAmbushPos] = Piece(owner: .east, rank: .bomb)
+        state.pieces[eastEasyTargetPos] = Piece(owner: .east, rank: .platoon)
+
+        state.pieces[southFlagPos] = Piece(owner: .south, rank: .flag)
+        state.pieces[eastFlagPos] = Piece(owner: .east, rank: .flag)
+        state.pieces[northFlagPos] = Piece(owner: .north, rank: .flag)
+        state.pieces[northSubPos] = Piece(owner: .north, rank: .company)
+        state.pieces[westFlagPos] = Piece(owner: .west, rank: .flag)
+        state.pieces[westSubPos] = Piece(owner: .west, rank: .company)
+
+        let chosenMove = AIPlayer.chooseMove(in: state, for: .south)
+        #expect(chosenMove != nil)
+        // 大師級 AI 絕不應該讓司令去吃 (10,6) 的誘餌排長而被 (8,6) 的炸彈白白炸死
+        let blunderedCommanderIntoTrap = (chosenMove?.from == southCommanderPos && chosenMove?.to == eastBaitPlatoonPos)
+        #expect(!blunderedCommanderIntoTrap)
     }
 }

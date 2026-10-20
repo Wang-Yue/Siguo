@@ -154,6 +154,24 @@ public struct SidebarControlView: View {
                     .foregroundStyle(.secondary)
             }
 
+            // AI 棋力難度切換
+            VStack(alignment: .leading, spacing: 4) {
+                Text("AI 棋力難度")
+                    .font(.caption.weight(.semibold))
+                Picker("AI 棋力難度", selection: Binding(
+                    get: { viewModel.state.aiDifficulty },
+                    set: { viewModel.setAIDifficulty($0) }
+                )) {
+                    ForEach(AIDifficulty.allCases, id: \.self) { diff in
+                        Text(diff.title).tag(diff)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text(viewModel.state.aiDifficulty.subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
             // 地雷規則切換
             VStack(alignment: .leading, spacing: 4) {
                 Text("地雷規則")
@@ -288,8 +306,22 @@ public struct SidebarControlView: View {
 
     private var matchControlsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("戰局控制與輔助")
-                .font(.subheadline.weight(.bold))
+            HStack {
+                Text("戰局控制與輔助")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                Picker("AI 難度", selection: Binding(
+                    get: { viewModel.state.aiDifficulty },
+                    set: { viewModel.setAIDifficulty($0) }
+                )) {
+                    ForEach(AIDifficulty.allCases, id: \.self) { diff in
+                        Text(diff.title).tag(diff)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .controlSize(.small)
+                .frame(width: 145)
+            }
 
             HStack(spacing: 8) {
                 Button {

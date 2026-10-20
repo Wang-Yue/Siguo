@@ -78,17 +78,20 @@ public final class GameViewModel {
     public func resetToNewSetup(
         visibilityMode: VisibilityMode? = nil,
         mineRule: MineRule? = nil,
+        aiDifficulty: AIDifficulty? = nil,
         preset: PresetFormation? = nil
     ) {
         cancelAITask()
         let nextVisibility = visibilityMode ?? state.visibilityMode
         let nextMineRule = mineRule ?? state.mineRule
+        let nextDifficulty = aiDifficulty ?? state.aiDifficulty
         let nextPreset = preset ?? state.selectedPreset
 
         let currentSouthLayout = GameEngine.extractSouthLayout(from: state)
         let newState = GameEngine.newGame(
             visibilityMode: nextVisibility,
             mineRule: nextMineRule,
+            aiDifficulty: nextDifficulty,
             southPreset: nextPreset,
             customSouthLayout: preset == nil ? currentSouthLayout : nil
         )
@@ -116,6 +119,15 @@ public final class GameViewModel {
         if state.phase == .setup && !snapshots.isEmpty {
             snapshots[0] = state
         }
+    }
+
+    /// 變更 AI 棋力難度
+    public func setAIDifficulty(_ difficulty: AIDifficulty) {
+        state.aiDifficulty = difficulty
+        if !snapshots.isEmpty {
+            snapshots[snapshots.count - 1] = state
+        }
+        statusMessage = "AI 棋力已切換為「\(difficulty.title)」：\(difficulty.subtitle)"
     }
 
     /// 套用預設陣型
@@ -384,7 +396,11 @@ public final class GameViewModel {
                 }
 
                 let snapshotForAI = self.state
-                if let chosenMove = AIPlayer.chooseMove(in: snapshotForAI, for: aiSeat) {
+                let chosenMove = await Task.detached(priority: .userInitiated) {
+                    AIPlayer.chooseMove(in: snapshotForAI, for: aiSeat)
+                }.value
+                if Task.isCancelled { break }
+                if let chosenMove {
                     self.executeMove(chosenMove)
                 } else {
                     break

@@ -368,6 +368,29 @@ public enum GamePhase: String, Codable, Sendable, Equatable {
     case finished
 }
 
+/// AI 棋力難度等級
+public enum AIDifficulty: String, CaseIterable, Codable, Sendable {
+    case normal = "NORMAL"
+    case expert = "EXPERT"
+    case master = "MASTER"
+
+    public var title: String {
+        switch self {
+        case .normal: return "普通"
+        case .expert: return "高手"
+        case .master: return "大師"
+        }
+    }
+
+    public var subtitle: String {
+        switch self {
+        case .normal: return "基礎戰術直覺，適合輕鬆休閒對局"
+        case .expert: return "具備交戰歷史記憶與反擊風險評估（SEE）"
+        case .master: return "全牌池貝氏推理 + 鐵路圖導航 + 2v2 多層 Alpha-Beta 搜尋"
+        }
+    }
+}
+
 /// 勝利陣營
 public enum WinningTeam: String, Codable, Sendable, Equatable {
     /// 南北同盟（玩家與北方盟友）獲勝

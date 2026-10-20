@@ -16,6 +16,10 @@ public struct BoardGraph: Sendable {
     public let railwayLines: [[BoardCoord]]
     /// 四條外圍彎道鐵路端點對（供視覺繪製弧線）
     public let outerCurvePairs: [(BoardCoord, BoardCoord)]
+    /// 非工兵棋子在兩點間的理想最少移動回合數（考慮鐵路直線/外圍單彎一步直達）
+    public let nonSapperTurnDistance: [BoardCoord: [BoardCoord: Int]]
+    /// 工兵在兩點間的理想最少移動回合數（考慮全鐵路網一步飛棋）
+    public let sapperTurnDistance: [BoardCoord: [BoardCoord: Int]]
 
     private init() {
         var nodesDict: [BoardCoord: BoardNode] = [:]
@@ -175,11 +179,55 @@ public struct BoardGraph: Sendable {
             }
         }
 
-        self.nodes = nodesDict
-        self.allCoords = nodesDict.keys.sorted {
+        let sortedAllCoords = nodesDict.keys.sorted {
             if $0.row != $1.row { return $0.row < $1.row }
             return $0.col < $1.col
         }
+
+        // 6. 預先計算 129x129 鐵路感知最短回合步數矩陣
+        // 6a. 非工兵一步可達鄰接表（公路鄰居 + 同一條連續鐵路軌道上的所有點）
+        var oneStepNonSapper: [BoardCoord: Set<BoardCoord>] = roadAdj
+        for line in lines {
+            for a in line {
+                for b in line where a != b {
+                    oneStepNonSapper[a, default: []].insert(b)
+                }
+            }
+        }
+
+        // 6b. 工兵一步可達鄰接表（公路鄰居 + 全鐵路連通網）
+        let allRailwayCoords = Set(railAdj.keys)
+        var oneStepSapper: [BoardCoord: Set<BoardCoord>] = roadAdj
+        for a in allRailwayCoords {
+            for b in allRailwayCoords where a != b {
+                oneStepSapper[a, default: []].insert(b)
+            }
+        }
+
+        func computeAllPairsBFS(adjacency: [BoardCoord: Set<BoardCoord>]) -> [BoardCoord: [BoardCoord: Int]] {
+            var matrix: [BoardCoord: [BoardCoord: Int]] = [:]
+            for start in sortedAllCoords {
+                var dist: [BoardCoord: Int] = [start: 0]
+                var queue: [BoardCoord] = [start]
+                var head = 0
+                while head < queue.count {
+                    let current = queue[head]
+                    head += 1
+                    let d = dist[current] ?? 0
+                    if let nextSet = adjacency[current] {
+                        for next in nextSet where dist[next] == nil {
+                            dist[next] = d + 1
+                            queue.append(next)
+                        }
+                    }
+                }
+                matrix[start] = dist
+            }
+            return matrix
+        }
+
+        self.nodes = nodesDict
+        self.allCoords = sortedAllCoords
         self.roadNeighbors = roadAdj
         self.railwayNeighbors = railAdj
         self.railwayLines = lines
@@ -189,6 +237,18 @@ public struct BoardGraph: Sendable {
             (BoardCoord(row: 5, col: 6), BoardCoord(row: 6, col: 5)),
             (BoardCoord(row: 5, col: 10), BoardCoord(row: 6, col: 11))
         ]
+        self.nonSapperTurnDistance = computeAllPairsBFS(adjacency: oneStepNonSapper)
+        self.sapperTurnDistance = computeAllPairsBFS(adjacency: oneStepSapper)
+    }
+
+    /// 查詢從 from 到 to 的鐵路感知最短回合步數
+    public func turnDistance(from start: BoardCoord, to target: BoardCoord, isSapper: Bool = false) -> Int {
+        if start == target { return 0 }
+        if isSapper {
+            return sapperTurnDistance[start]?[target] ?? 12
+        } else {
+            return nonSapperTurnDistance[start]?[target] ?? 12
+        }
     }
 
     /// 將某方的局部座標 (row: 0..5, col: 0..4) 轉換為 17x17 全局座標
